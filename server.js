@@ -1,14 +1,16 @@
 const express = require("express");
 const bodyParser = require("body-parser");
+const cors = require("cors");
 const mongoose = require("mongoose");
 const morgan = require("morgan");
 const UserModel = require("./src/mongo/models/User");
 const TodoModel = require("./src/mongo/models/Todo");
 
-const { encode, decode } = require("./src/jwt");
+const { encode, decode, createSalt, hashPassword } = require("./src/jwt");
 
 const app = express();
 
+app.use(cors());
 app.use(bodyParser.json());
 app.use(morgan("combined"));
 
@@ -30,6 +32,8 @@ app.get("/", (req, res) => {
 
 // user routes
 app.post("/register", async (req, res) => {
+  console.log("body : ", req.body);
+
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -46,7 +50,10 @@ app.post("/register", async (req, res) => {
       .json({ error: true, msg: "User with email already exists" });
   }
 
-  await new UserModel({ email, password }).save();
+  const salt = createSalt();
+  const hashedPassword = hashPassword(password, salt);
+
+  await new UserModel({ email, password: hashedPassword }).save();
 
   return res.status(200).json({ success: true });
 });
@@ -58,15 +65,23 @@ app.post("/login", async (req, res) => {
     return res.status(403).json({ error: true, msg: "Invalid params" });
   }
 
-  const user = await UserModel.findOne({ email, password });
+  const user = await UserModel.findOne({ email });
 
-  if (user) {
-    const token = encode({ userId: user._id });
-
-    return res.status(200).json({ user, token });
+  if (!user) {
+    return res.status(403).json({ error: true, msg: "User does not exists" });
   }
 
-  return res.status(403).json({ error: true, msg: "User does not exists" });
+  const salt = user.password.split("$")[0];
+
+  const hashedPassword = hashPassword(password, salt);
+
+  if (hashedPassword !== user.password) {
+    return res.status(403).json({ error: true, msg: "Incorrect Password" });
+  }
+
+  const token = encode({ userId: user._id });
+
+  return res.status(200).json({ user, token });
 });
 
 // todo routes
